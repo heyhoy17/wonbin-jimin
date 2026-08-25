@@ -9,7 +9,8 @@
 <meta property="og:title" content="이원빈 ❤️ 이지민 결혼합니다">
 <meta property="og:description" content="2027.01.16 (토) PM 12:30
 라시따시어터">
-<meta property="og:image" content="og-image.jpg">
+<meta property="og:image" content="https://heyhoy17.github.io/wonbin-jimin/og-image.jpg">
+<meta property="og:url" content="https://heyhoy17.github.io/wonbin-jimin/invitation">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" as="style" crossorigin
@@ -435,6 +436,23 @@
     color: #555555;
     text-align: right;
   }
+  .sticky-note-delete {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.7);
+    color: #ffffff;
+    border: none;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   /* Modal */
   .modal-overlay {
@@ -612,6 +630,9 @@
     50% { height: 16px; }
   }
 </style>
+<!-- Firebase (Firestore) for shared guestbook -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <audio id="bgm" src="bgm.mp3" loop preload="auto"></audio>
@@ -974,38 +995,58 @@
       exitPlacingMode();
     });
 
-    // ---- Shared storage (visible to everyone) ----
-    async function getNotes() {
+    // ---- Firebase (Firestore) shared storage ----
+    const firebaseConfig = {
+      apiKey: "AIzaSyB8mVUVV01YYBTFovdP-2cmMFlb4OOHygM",
+      authDomain: "wonbin-jimin.firebaseapp.com",
+      projectId: "wonbin-jimin",
+      storageBucket: "wonbin-jimin.firebasestorage.app",
+      messagingSenderId: "799002625580",
+      appId: "1:799002625580:web:3868a66c94605e62343389"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const guestbookCollection = db.collection('guestbook');
+
+    const ADMIN_PASSWORD = '19950617';
+
+    async function saveNote(note) {
       try {
-        const result = await window.storage.get('guestbook-notes', true);
-        return result ? JSON.parse(result.value) : [];
-      } catch (e) {
-        return [];
-      }
-    }
-    async function saveAllNotes(notes) {
-      try {
-        await window.storage.set('guestbook-notes', JSON.stringify(notes), true);
+        await guestbookCollection.doc(note.id).set(note);
       } catch (e) {
         console.error('방명록 저장 실패:', e);
       }
     }
-    async function saveNote(note) {
-      const notes = await getNotes();
-      notes.push(note);
-      await saveAllNotes(notes);
-    }
     async function updateNotePosition(id, x, y) {
-      const notes = await getNotes();
-      const idx = notes.findIndex(n => n.id === id);
-      if (idx !== -1) {
-        notes[idx].x = x;
-        notes[idx].y = y;
-        await saveAllNotes(notes);
+      try {
+        await guestbookCollection.doc(id).update({ x, y });
+      } catch (e) {
+        console.error('위치 업데이트 실패:', e);
+      }
+    }
+    async function deleteNoteFromDb(id) {
+      try {
+        await guestbookCollection.doc(id).delete();
+      } catch (e) {
+        console.error('삭제 실패:', e);
       }
     }
 
+    function requestDeleteNote(id, el) {
+      const pw = prompt('관리자 비밀번호를 입력해주세요.');
+      if (pw === null) return; // cancelled
+      if (pw !== ADMIN_PASSWORD) {
+        alert('비밀번호가 올바르지 않습니다.');
+        return;
+      }
+      deleteNoteFromDb(id);
+      el.remove();
+      renderedIds.delete(id);
+    }
+
     function renderNote(note) {
+      if (document.querySelector(`.sticky-note[data-id="${note.id}"]`)) return; // already rendered
+
       const el = document.createElement('div');
       el.className = 'sticky-note';
       el.style.backgroundImage = `url('${patterns[note.patternIdx]}')`;
@@ -1021,8 +1062,17 @@
       nameEl.className = 'sticky-note-name';
       nameEl.textContent = '- ' + note.name;
 
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'sticky-note-delete';
+      deleteBtn.textContent = '×';
+      deleteBtn.onclick = function(e) {
+        e.stopPropagation();
+        requestDeleteNote(note.id, el);
+      };
+
       el.appendChild(textEl);
       el.appendChild(nameEl);
+      el.appendChild(deleteBtn);
       corkboard.appendChild(el);
 
       makeDraggable(el);
@@ -1032,6 +1082,7 @@
       let startX, startY, origX, origY, dragging = false;
 
       el.addEventListener('pointerdown', function(e) {
+        if (e.target.classList.contains('sticky-note-delete')) return;
         e.stopPropagation();
         dragging = true;
         el.setPointerCapture(e.pointerId);
@@ -1063,19 +1114,31 @@
     // Track which notes are already on the board to avoid duplicates
     const renderedIds = new Set();
 
-    async function loadAndRenderNotes() {
-      const notes = await getNotes();
-      notes.forEach(note => {
-        if (!renderedIds.has(note.id)) {
-          renderedIds.add(note.id);
-          renderNote(note);
+    // Real-time listener: automatically reflects notes added, moved, or
+    // deleted by any visitor, without needing to poll or refresh.
+    guestbookCollection.onSnapshot(function(snapshot) {
+      snapshot.docChanges().forEach(function(change) {
+        const note = change.doc.data();
+        if (change.type === 'added') {
+          if (!renderedIds.has(note.id)) {
+            renderedIds.add(note.id);
+            renderNote(note);
+          }
+        } else if (change.type === 'removed') {
+          const el = document.querySelector(`.sticky-note[data-id="${note.id}"]`);
+          if (el) el.remove();
+          renderedIds.delete(note.id);
+        } else if (change.type === 'modified') {
+          const el = document.querySelector(`.sticky-note[data-id="${note.id}"]`);
+          if (el) {
+            el.style.left = note.x + 'px';
+            el.style.top = note.y + 'px';
+          }
         }
       });
-    }
-
-    loadAndRenderNotes();
-    // Periodically check for notes added by other guests
-    setInterval(loadAndRenderNotes, 6000);
+    }, function(error) {
+      console.error('방명록 실시간 연결 실패:', error);
+    });
   </script>
 </body>
 </html>

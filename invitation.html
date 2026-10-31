@@ -454,6 +454,15 @@
     display: none;
   }
   
+
+  /* 이미지 길게 눌러 저장/복사/드래그 방지 */
+  img {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -616,7 +625,7 @@
     </div>
 
     <div class="button-wrap">
-      <a class="guestbook-btn" href="https://naver.me/51u4WUC9" target="_blank" rel="noopener noreferrer">사진 올리기</a>
+      <a class="guestbook-btn" href="https://wonbin-jimin-guest-snap.barrybiny.workers.dev/" target="_blank" rel="noopener noreferrer">사진 올리기</a>
     </div>
   </div>
 
@@ -631,6 +640,14 @@
   </div>
 
   <script>
+    // ---- 이미지 저장 메뉴 / 드래그 방지 ----
+    document.addEventListener('contextmenu', function(e) {
+      if (e.target.tagName === 'IMG' || e.target.closest('.gallery-item, .lightbox, .info-section, .invitation-image')) e.preventDefault();
+    });
+    document.addEventListener('dragstart', function(e) {
+      if (e.target.tagName === 'IMG') e.preventDefault();
+    });
+
     // ---- Background music ----
     const bgm = document.getElementById('bgm');
     const musicToggle = document.getElementById('musicToggle');
